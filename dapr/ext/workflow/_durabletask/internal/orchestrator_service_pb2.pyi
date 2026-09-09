@@ -659,9 +659,9 @@ class PurgeInstancesRequest(_message.Message):
     @_builtins.property
     def router(self) -> _orchestration_pb2.TaskRouter:
         """router optionally routes this operation to the workflow instance owned
-        by another app. The purge is delegated to the target app, which honours
-        the caller's recursive flag. sourceAppID is stamped by the sidecar, not
-        the client.
+        by another app. Cross-app purges are delegated to the target app in
+        full, so they are always recursive on the remote side. sourceAppID is
+        stamped by the sidecar, not the client.
         """
 
     def __init__(

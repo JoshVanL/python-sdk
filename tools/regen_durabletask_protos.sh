@@ -42,6 +42,19 @@ if [ -n "$DURABLETASK_PROTOBUF_DIR" ]; then
     fi
     echo "Using local durabletask-protobuf checkout at ${DURABLETASK_PROTOBUF_DIR}"
     proto_dir="${DURABLETASK_PROTOBUF_DIR}/protos"
+
+    # The recorded commit is only meaningful if the protos it names are the ones
+    # actually fed to protoc. Uncommitted or untracked proto changes would be
+    # baked into the stubs while PROTO_SOURCE_COMMIT_HASH pointed at HEAD, so the
+    # provenance would be a lie. Refuse instead: commit the proto change (or push
+    # it upstream) and rerun.
+    if [ -n "$(git -C "${DURABLETASK_PROTOBUF_DIR}" status --porcelain -- protos 2>/dev/null)" ]; then
+        echo "Error: ${DURABLETASK_PROTOBUF_DIR}/protos has uncommitted or untracked changes."
+        echo "The generated stubs would not match the commit recorded in PROTO_SOURCE_COMMIT_HASH."
+        git -C "${DURABLETASK_PROTOBUF_DIR}" status --short -- protos
+        exit 1
+    fi
+
     proto_source_commit="$(git -C "${DURABLETASK_PROTOBUF_DIR}" rev-parse HEAD 2>/dev/null || true)"
 else
     if type "curl" > /dev/null 2>&1; then
