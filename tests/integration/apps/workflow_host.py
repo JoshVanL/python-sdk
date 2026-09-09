@@ -30,10 +30,6 @@ from dapr.ext.workflow import DaprWorkflowContext, WorkflowRuntime
 WORKFLOW_NAME = 'CrossAppWaitForEvent'
 EVENT_NAME = 'Finish'
 
-# Registered but deliberately left out of the host's WorkflowAccessPolicy, so a
-# cross-app schedule of this name exercises the denial path.
-DENIED_WORKFLOW_NAME = 'CrossAppDenied'
-
 
 def wait_for_event_workflow(ctx: DaprWorkflowContext, wf_input: Any) -> Any:
     """Blocks until EVENT_NAME arrives, then returns its payload."""
@@ -41,16 +37,9 @@ def wait_for_event_workflow(ctx: DaprWorkflowContext, wf_input: Any) -> Any:
     return payload
 
 
-def denied_workflow(ctx: DaprWorkflowContext, wf_input: Any) -> Any:
-    """Never reached cross-app: the host's policy does not grant it to the caller."""
-    payload = yield ctx.wait_for_external_event(EVENT_NAME)
-    return payload
-
-
 def main() -> None:
     runtime = WorkflowRuntime()
     runtime.register_workflow(wait_for_event_workflow, name=WORKFLOW_NAME)
-    runtime.register_workflow(denied_workflow, name=DENIED_WORKFLOW_NAME)
     runtime.start()
 
     # The test drives everything through the sidecar, so this process just has
