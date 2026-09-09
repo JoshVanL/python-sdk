@@ -24,11 +24,12 @@ runtime the app_id is ignored and the caller would act on its own app.
 """
 
 import time
+from pathlib import Path
 
 import pytest
 
 from dapr.ext.workflow import DaprWorkflowClient
-from tests.integration.apps.workflow_host import EVENT_NAME, WORKFLOW_NAME
+from tests.integration.apps.workflow_host import DENIED_WORKFLOW_NAME, EVENT_NAME, WORKFLOW_NAME
 
 pytestmark = pytest.mark.dapr_head
 
@@ -58,6 +59,7 @@ def sidecars(dapr_env, apps_dir):
         internal_grpc_port=HOST_INTERNAL_GRPC_PORT,
         metrics_port=HOST_METRICS_PORT,
         app_cmd=f'python3 {apps_dir / "workflow_host.py"}',
+        resources=Path(__file__).parent / 'resources_crossapp',
     )
     dapr_env.start_sidecar(
         app_id=CALLER_APP_ID,
@@ -112,6 +114,15 @@ def _schedule_on_host(caller_client: DaprWorkflowClient) -> str:
     raise AssertionError(f'host app never accepted a cross-app schedule: {last_error}')
 
 
+def _wait_until_absent(client: DaprWorkflowClient, instance_id: str) -> None:
+    deadline = time.monotonic() + STATUS_TIMEOUT
+    while time.monotonic() < deadline:
+        if client.get_workflow_state(instance_id) is None:
+            return
+        time.sleep(0.2)
+    raise AssertionError(f'{instance_id} was still present after purge')
+
+
 def _wait_for_status(client: DaprWorkflowClient, instance_id: str, expected: str) -> None:
     deadline = time.monotonic() + STATUS_TIMEOUT
     seen = None
@@ -159,7 +170,7 @@ def test_cross_app_raise_event_completes_and_purge_removes(caller_client, host_c
     assert state.runtime_status.name == 'COMPLETED'
 
     caller_client.purge_workflow(instance_id, app_id=HOST_APP_ID)
-    assert host_client.get_workflow_state(instance_id) is None
+    _wait_until_absent(host_client, instance_id)
 
 
 def test_cross_app_terminate(caller_client):
@@ -168,3 +179,21 @@ def test_cross_app_terminate(caller_client):
 
     caller_client.terminate_workflow(instance_id, app_id=HOST_APP_ID)
     _wait_for_status(caller_client, instance_id, 'TERMINATED')
+
+
+def test_cross_app_denied_workflow_is_rejected(caller_client, host_client):
+    """The host's WorkflowAccessPolicy does not grant this workflow to the caller."""
+    with pytest.raises(Exception) as excinfo:
+        instance_id = caller_client.schedule_new_workflow(
+            workflow=DENIED_WORKFLOW_NAME, app_id=HOST_APP_ID
+        )
+        # Some runtimes surface the denial on the first read rather than on the
+        # schedule call itself, so force a read before deciding it succeeded.
+        caller_client.wait_for_workflow_start(
+            instance_id, app_id=HOST_APP_ID, timeout_in_seconds=10
+        )
+
+    message = str(excinfo.value).lower()
+    assert 'permission' in message or 'denied' in message or 'not allowed' in message, (
+        f'expected an access policy denial, got: {excinfo.value}'
+    )
